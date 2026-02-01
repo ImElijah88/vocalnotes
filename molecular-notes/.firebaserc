@@ -1,0 +1,13 @@
+{
+  "projects": {},
+  "targets": {
+    "imstructure-79386": {
+      "hosting": {
+        "vocalnotes": [
+          "vocalnotes"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

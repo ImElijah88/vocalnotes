@@ -1,0 +1,7 @@
+{
+  "name": "Molecular Notes",
+  "description": "A node-based 3D-style note-taking app with speech-to-text dictation and AI-powered grammar refinement.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
