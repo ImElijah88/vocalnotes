@@ -385,6 +385,11 @@ const App: React.FC = () => {
       const t1 = e.touches[0];
       const t2 = e.touches[1];
       lastTouchDistRef.current = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      // Clear any existing long-press timer when pinch starts
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        setLongPressTimer(null);
+      }
       return;
     }
 
@@ -411,7 +416,7 @@ const App: React.FC = () => {
       setTargetNodeId(nodeId || null);
     }, 450);
     setLongPressTimer(timer);
-  }, [activeTool, movingNodeId, getCanvasCoords, connectingFromId, zoom, pan]);
+  }, [activeTool, movingNodeId, getCanvasCoords, connectingFromId, zoom, pan, longPressTimer]);
 
   const handleInputMove = useCallback((e: any) => {
     if (e.touches && e.touches.length === 2) {
