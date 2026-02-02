@@ -5,7 +5,7 @@ import {
   Hand, Palette, Plus, Minus, MoveRight, Scissors, Hash, 
   Minus as MinusIcon, Zap, AlignJustify, User as UserIcon,
   GripVertical, ChevronDown, FileText, Lightbulb, Footprints, 
-  DollarSign, Wrench, User, Cable
+  DollarSign, Wrench, User, Cable, Trash2
 } from 'lucide-react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { Folder as FolderType, LineType, Note, NoteType } from '../types';
@@ -51,6 +51,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [dropTargetFolderId, setDropTargetFolderId] = useState<string | null>(null);
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [dropPosition, setDropPosition] = useState<'before' | 'after' | null>(null);
+  const [deleteModeActive, setDeleteModeActive] = useState(false);
+  const [confirmDeleteFolderId, setConfirmDeleteFolderId] = useState<string | null>(null);
 
   const lineIcons: Record<LineType, React.ReactNode> = {
     cable: <Cable size={20} />,
@@ -215,12 +217,27 @@ const Sidebar: React.FC<SidebarProps> = ({
             <div className="p-8 border-b border-white/5 flex items-end justify-between bg-black/40 gap-2">
               <img src="/logo-512.png" alt="Vocal Notes" className="w-8 h-8 shrink-0" />
               <h2 className="font-black text-[11px] uppercase tracking-[0.4em] text-cyan-500 leading-none pb-0.5 flex-1">Vocal Notes</h2>
-              <div className="relative group/add">
-                <button onClick={onAddFolder} className="w-[34px] h-[34px] flex items-center justify-center hover:bg-cyan-500/10 rounded-lg text-gray-400 hover:text-cyan-400 transition-all active:scale-90">
-                  <FolderPlus size={18} />
-                </button>
-                <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-black border border-white/10 rounded-lg text-[8px] font-black uppercase tracking-widest text-cyan-400 opacity-0 group-hover/add:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[200]">
-                  New Canvas
+              <div className="flex gap-2">
+                <div className="relative group/delete">
+                  <button 
+                    onClick={() => setDeleteModeActive(!deleteModeActive)} 
+                    className={`w-[34px] h-[34px] flex items-center justify-center rounded-lg transition-all active:scale-90 ${
+                      deleteModeActive ? 'bg-red-500/20 text-red-400' : 'hover:bg-red-500/10 text-gray-400 hover:text-red-400'
+                    }`}
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                  <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-black border border-white/10 rounded-lg text-[8px] font-black uppercase tracking-widest text-red-400 opacity-0 group-hover/delete:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[200]">
+                    Delete Mode
+                  </div>
+                </div>
+                <div className="relative group/add">
+                  <button onClick={onAddFolder} className="w-[34px] h-[34px] flex items-center justify-center hover:bg-cyan-500/10 rounded-lg text-gray-400 hover:text-cyan-400 transition-all active:scale-90">
+                    <FolderPlus size={18} />
+                  </button>
+                  <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-black border border-white/10 rounded-lg text-[8px] font-black uppercase tracking-widest text-cyan-400 opacity-0 group-hover/add:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[200]">
+                    New Canvas
+                  </div>
                 </div>
               </div>
             </div>
@@ -238,10 +255,16 @@ const Sidebar: React.FC<SidebarProps> = ({
                     )}
                     <div className="flex flex-col rounded-2xl overflow-hidden transition-all border border-transparent" onDragOver={(e) => handleFolderDragOver(e, folder.id)} onDragLeave={() => { setDropTargetFolderId(null); setDropPosition(null); }} onDrop={(e) => handleFolderDrop(e, folder.id)}>
                     <div 
-                      draggable 
+                      draggable={!deleteModeActive}
                       onDragStart={(e) => { e.dataTransfer.setData('type', 'folder'); setDraggedFolderId(folder.id); }} 
-                      onClick={() => onFolderSelect(folder.id)} 
-                      className={`flex items-center gap-4 px-4 h-14 cursor-pointer transition-all group ${isActive ? 'bg-cyan-500/10 text-cyan-100' : 'text-gray-500 hover:bg-white/5 hover:text-white'} ${dropTargetFolderId === folder.id ? 'bg-cyan-500/5' : ''}`}
+                      onClick={() => deleteModeActive ? setConfirmDeleteFolderId(folder.id) : onFolderSelect(folder.id)} 
+                      className={`flex items-center gap-4 px-4 h-14 cursor-pointer transition-all group ${
+                        isActive && !deleteModeActive ? 'bg-cyan-500/10 text-cyan-100' : 'text-gray-500 hover:bg-white/5 hover:text-white'
+                      } ${
+                        dropTargetFolderId === folder.id ? 'bg-cyan-500/5' : ''
+                      } ${
+                        deleteModeActive ? 'hover:bg-red-500/10 hover:text-red-400' : ''
+                      }`}
                     >
                       <GripVertical size={14} className="opacity-0 group-hover:opacity-20 cursor-grab shrink-0" />
                       <FolderIcon size={18} className={isActive ? 'text-cyan-500' : 'text-gray-700'} />
@@ -280,6 +303,34 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 );
               })}
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {confirmDeleteFolderId && (
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6">
+          <div className="max-w-sm w-full bg-[#0a0a0a] border border-white/10 rounded-2xl p-6 flex flex-col gap-4 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+            <div className="space-y-2">
+              <h2 className="text-base font-bold text-white">Delete Folder?</h2>
+              <p className="text-gray-400 text-sm">
+                "{folders.find(f => f.id === confirmDeleteFolderId)?.name}" and all {notes.filter(n => n.folderId === confirmDeleteFolderId).length} note{notes.filter(n => n.folderId === confirmDeleteFolderId).length !== 1 ? 's' : ''} inside will be permanently removed.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => { 
+                  onUpdateFolders(folders.filter(f => f.id !== confirmDeleteFolderId)); 
+                  setConfirmDeleteFolderId(null); 
+                  setDeleteModeActive(false);
+                }} 
+                className="flex-1 h-10 bg-red-600 hover:bg-red-500 text-white text-sm font-bold rounded-lg transition-all"
+              >
+                Delete
+              </button>
+              <button onClick={() => setConfirmDeleteFolderId(null)} className="flex-1 h-10 bg-white/5 hover:bg-white/10 text-gray-300 text-sm font-bold rounded-lg transition-all">
+                Cancel
+              </button>
             </div>
           </div>
         </div>

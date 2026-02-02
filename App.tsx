@@ -920,16 +920,21 @@ const App: React.FC = () => {
       )}
 
       {confirmDeleteId && (
-        <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/90 backdrop-blur-xl p-6">
-          <div className="max-w-md w-full bg-[#0a0a0a] border border-fuchsia-500/30 rounded-[2.5rem] p-10 flex flex-col items-center text-center gap-8 shadow-[0_0_100px_rgba(217,70,239,0.1)]">
-            <div className="w-20 h-20 bg-fuchsia-500/10 rounded-full flex items-center justify-center text-fuchsia-500"><AlertTriangle size={44} /></div>
-            <div className="space-y-3">
-              <h2 className="text-xl font-black uppercase tracking-widest text-white">Dissolve Node?</h2>
-              <p className="text-gray-400 text-xs leading-relaxed">Permanent destruction of molecule: <span className="text-white font-bold">"{notes.find(n => n.id === confirmDeleteId)?.title}"</span>.</p>
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6">
+          <div className="max-w-sm w-full bg-[#0a0a0a] border border-white/10 rounded-2xl p-6 flex flex-col gap-4 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+            <div className="space-y-2">
+              <h2 className="text-base font-bold text-white">Delete Note?</h2>
+              <p className="text-gray-400 text-sm">
+                "{notes.find(n => n.id === confirmDeleteId)?.title}" will be permanently removed.
+              </p>
             </div>
-            <div className="w-full flex flex-col gap-4">
-              <button onClick={() => { updateData({ notes: notes.filter(n => n.id !== confirmDeleteId), connections: connections.filter(c => c.from !== confirmDeleteId && c.to !== confirmDeleteId) }); setConfirmDeleteId(null); }} className="w-full h-14 bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-black uppercase tracking-widest rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-95 shadow-lg">Dissolve</button>
-              <button onClick={() => setConfirmDeleteId(null)} className="w-full h-14 bg-white/5 hover:bg-white/10 text-gray-400 font-black uppercase tracking-widest rounded-2xl border border-white/5 transition-all">Preserve</button>
+            <div className="flex gap-3">
+              <button onClick={() => { updateData({ notes: notes.filter(n => n.id !== confirmDeleteId), connections: connections.filter(c => c.from !== confirmDeleteId && c.to !== confirmDeleteId) }); setConfirmDeleteId(null); }} className="flex-1 h-10 bg-red-600 hover:bg-red-500 text-white text-sm font-bold rounded-lg transition-all">
+                Delete
+              </button>
+              <button onClick={() => setConfirmDeleteId(null)} className="flex-1 h-10 bg-white/5 hover:bg-white/10 text-gray-300 text-sm font-bold rounded-lg transition-all">
+                Cancel
+              </button>
             </div>
           </div>
         </div>
