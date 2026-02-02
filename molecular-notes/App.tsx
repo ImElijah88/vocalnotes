@@ -9,7 +9,7 @@ import SettingsModal from './components/SettingsModal';
 import ShareModal from './components/ShareModal';
 import { Folder, Note, Connection, Point, NoteType, LineType, RadialOption, GeminiConfig } from './types';
 import { v4 as uuidv4 } from 'uuid';
-import { Lightbulb, Footprints, FileText, DollarSign, Wrench, User, Trash2, AlertTriangle } from 'lucide-react';
+import { Lightbulb, Footprints, FileText, DollarSign, Wrench, User, Trash2, AlertTriangle, CheckSquare } from 'lucide-react';
 import { auth, db, logout } from './services/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
@@ -78,6 +78,10 @@ const App: React.FC = () => {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [sharingNoteId, setSharingNoteId] = useState<string | null>(null);
 
+  // Background state
+  const [activeBackground, setActiveBackground] = useState<string>('grid');
+  const [customBackgrounds, setCustomBackgrounds] = useState<string[]>([]);
+
   // New states for Gemini configurations
   const [geminiConfigs, setGeminiConfigs] = useState<GeminiConfig[]>([]);
   const [activeGeminiConfigId, setActiveGeminiConfigId] = useState<string | null>(null);
@@ -122,7 +126,9 @@ const App: React.FC = () => {
     newConnections: Connection[], 
     newColors: string[],
     newGeminiConfigs: GeminiConfig[], // New parameter
-    newActiveGeminiConfigId: string | null // New parameter
+    newActiveGeminiConfigId: string | null, // New parameter
+    newActiveBackground: string,
+    newCustomBackgrounds: string[]
   ) => {
     if (user) {
       const userDocRef = doc(db, 'users', user.uid);
@@ -133,6 +139,8 @@ const App: React.FC = () => {
         savedColors: newColors,
         geminiConfigs: newGeminiConfigs, // Save to Firestore
         activeGeminiConfigId: newActiveGeminiConfigId, // Save to Firestore
+        activeBackground: newActiveBackground,
+        customBackgrounds: newCustomBackgrounds,
         lastUpdated: new Date().toISOString()
       }, { merge: true });
     } else if (isGuest) {
@@ -142,6 +150,8 @@ const App: React.FC = () => {
       localStorage.setItem('molecular_colors', JSON.stringify(newColors));
       localStorage.setItem(GEMINI_CONFIGS_STORAGE_KEY, JSON.stringify(newGeminiConfigs)); // Save to localStorage
       localStorage.setItem(ACTIVE_GEMINI_CONFIG_ID_STORAGE_KEY, newActiveGeminiConfigId || ''); // Save to localStorage
+      localStorage.setItem('molecular_background', newActiveBackground);
+      localStorage.setItem('molecular_custom_backgrounds', JSON.stringify(newCustomBackgrounds));
     }
   }, [user, isGuest]);
 
@@ -171,7 +181,7 @@ const App: React.FC = () => {
     if (geminiUpdater?.activeConfigId !== undefined) setActiveGeminiConfigId(geminiUpdater.activeConfigId);
     
     // Pass all current states to persistData
-    persistData(updatedFolders, updatedNotes, updatedConnections, updatedColors, updatedGeminiConfigs, updatedActiveGeminiConfigId);
+    persistData(updatedFolders, updatedNotes, updatedConnections, updatedColors, updatedGeminiConfigs, updatedActiveGeminiConfigId, activeBackground, customBackgrounds);
   }, [notes, folders, connections, savedColors, geminiConfigs, activeGeminiConfigId, persistData]);
 
   // Initial data load and Gemini config setup
@@ -226,8 +236,10 @@ const App: React.FC = () => {
           if (data.connections) setConnections(data.connections);
           if (data.savedColors) setSavedColors(data.savedColors);
           
-          if (data.geminiConfigs) setGeminiConfigs((data.geminiConfigs as any[]).map((c: any) => migrateGeminiConfig(c)));
+      if (data.geminiConfigs) setGeminiConfigs((data.geminiConfigs as any[]).map((c: any) => migrateGeminiConfig(c)));
           if (data.activeGeminiConfigId !== undefined) setActiveGeminiConfigId(data.activeGeminiConfigId);
+          if (data.activeBackground) setActiveBackground(data.activeBackground);
+          if (data.customBackgrounds) setCustomBackgrounds(data.customBackgrounds);
         } else {
           const initialApiKey = process.env.API_KEY || '';
           const defaultId = uuidv4();
@@ -238,7 +250,7 @@ const App: React.FC = () => {
             liveModelName: DEFAULT_LIVE_MODEL, 
             refinementModelName: DEFAULT_REFINEMENT_MODEL 
           };
-          persistData(MOCK_FOLDERS, MOCK_NOTES, MOCK_CONNECTIONS, savedColors, [defaultConfig], defaultId);
+          persistData(MOCK_FOLDERS, MOCK_NOTES, MOCK_CONNECTIONS, savedColors, [defaultConfig], defaultId, 'grid', []);
         }
       });
       return () => unsub();
@@ -251,6 +263,11 @@ const App: React.FC = () => {
       if (savedConns) setConnections(JSON.parse(savedConns));
       if (savedFolders) setFolders(JSON.parse(savedFolders));
       if (savedColorsLocal) setSavedColors(JSON.parse(savedColorsLocal));
+      
+      const savedBg = localStorage.getItem('molecular_background');
+      if (savedBg) setActiveBackground(savedBg);
+      const savedCustomBgs = localStorage.getItem('molecular_custom_backgrounds');
+      if (savedCustomBgs) setCustomBackgrounds(JSON.parse(savedCustomBgs));
       
       // Load Gemini settings for guest
       loadGeminiConfigs();
@@ -570,7 +587,6 @@ const App: React.FC = () => {
     if (!from || !to) return null;
 
     const baseProps = {
-      key: conn.id,
       x1: from.x,
       y1: from.y,
       x2: to.x,
@@ -669,7 +685,7 @@ const App: React.FC = () => {
       );
     }
 
-    return <line {...baseProps} />;
+    return <line key={conn.id} {...baseProps} />;
   };
 
   const updateNoteTitle = (id: string, newTitle: string) => {
@@ -685,15 +701,36 @@ const App: React.FC = () => {
       case 'cost': return <DollarSign size={size} />;
       case 'tool': return <Wrench size={size} />;
       case 'actor': return <User size={size} />;
+      case 'task': return <CheckSquare size={size} />;
       default: return <FileText size={size} />;
     }
+  };
+
+  const getBackgroundStyle = () => {
+    const defaultBgs: Record<string, any> = {
+      grid: { backgroundImage: 'radial-gradient(circle, #1a1a1a 1px, rgba(0, 0, 0, 0) 1px)', backgroundSize: '30px 30px' },
+      dots: { backgroundImage: 'radial-gradient(circle, #2a2a2a 2px, transparent 2px)', backgroundSize: '40px 40px' },
+      lines: { backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 29px, #1a1a1a 29px, #1a1a1a 30px)' },
+      solid: { backgroundColor: '#050505' },
+      spline1: { backgroundColor: '#000000' },
+    };
+    if (defaultBgs[activeBackground]) return defaultBgs[activeBackground];
+    if (activeBackground.startsWith('#')) return { backgroundColor: activeBackground };
+    if (activeBackground.includes('spline.design')) return { backgroundColor: '#000000' };
+    return { backgroundImage: `url(${activeBackground})`, backgroundSize: 'cover', backgroundPosition: 'center' };
   };
 
   if (isInitializing) return null;
   if (!user && !isGuest) return <LandingPage onGuestAccess={() => { setIsGuest(true); localStorage.setItem('molecular_is_guest', 'true'); }} />;
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#050505] bg-grid relative selection:bg-cyan-500/20">
+    <div className="flex h-screen w-screen overflow-hidden bg-[#050505] relative selection:bg-cyan-500/20" style={getBackgroundStyle()}>
+      {(activeBackground.includes('spline.design') || activeBackground === 'spline1') && (
+        <iframe 
+          src={activeBackground === 'spline1' ? 'https://my.spline.design/blackhole-P8xBUx7R2aecELsor3E9OaRQ/' : activeBackground}
+          className="absolute inset-0 w-full h-full pointer-events-none border-0"
+        />
+      )}
       {!editingNoteId && (
         <Sidebar 
           user={user}
@@ -733,6 +770,11 @@ const App: React.FC = () => {
           onSaveConfig={handleSaveGeminiConfig} // Pass save callback
           onDeleteConfig={handleDeleteGeminiConfig} // Pass delete callback
           onSetActiveConfig={handleSetActiveGeminiConfig} // Pass set active callback
+          activeBackground={activeBackground}
+          customBackgrounds={customBackgrounds}
+          onSetBackground={(bg) => { setActiveBackground(bg); persistData(folders, notes, connections, savedColors, geminiConfigs, activeGeminiConfigId, bg, customBackgrounds); }}
+          onAddCustomBackground={(bg) => { const newBgs = [...customBackgrounds, bg]; setCustomBackgrounds(newBgs); persistData(folders, notes, connections, savedColors, geminiConfigs, activeGeminiConfigId, activeBackground, newBgs); }}
+          onDeleteCustomBackground={(bg) => { const newBgs = customBackgrounds.filter(b => b !== bg); setCustomBackgrounds(newBgs); persistData(folders, notes, connections, savedColors, geminiConfigs, activeGeminiConfigId, activeBackground, newBgs); }}
         />
       )}
 
@@ -828,6 +870,7 @@ const App: React.FC = () => {
           onSelect={(opt: RadialOption) => {
             if (opt === 'create') {
               setIsCreateMenuOpen(true);
+              // Keep radialPos for CreateMenu positioning, but it will be cleared when CreateMenu closes
             }
             else if (opt === 'move' && targetNodeId) { 
               setMovingNodeId(targetNodeId); 
@@ -862,7 +905,23 @@ const App: React.FC = () => {
         <NoteModal 
           note={notes.find(n => n.id === editingNoteId)!} 
           onClose={() => setEditingNoteId(null)} 
-          onSave={(u) => updateData({ notes: notes.map(n => n.id === u.id ? u : n) })} 
+          onSave={(u) => updateData({ notes: notes.map(n => n.id === u.id ? u : n) })}
+          onCreateNote={(content, title) => {
+            const editingNote = notes.find(n => n.id === editingNoteId);
+            if (editingNote) {
+              const newNote: Note = {
+                id: uuidv4(),
+                folderId: activeFolderId,
+                title: title,
+                content: content,
+                x: editingNote.x + 150,
+                y: editingNote.y + 150,
+                type: editingNote.type,
+                color: editingNote.color
+              };
+              updateData({ notes: [...notes, newNote] });
+            }
+          }}
           apiKey={activeApiKey}
           liveModelName={activeLiveModelName}
           refinementModelName={activeRefinementModelName}
@@ -879,16 +938,21 @@ const App: React.FC = () => {
       )}
 
       {confirmDeleteId && (
-        <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/90 backdrop-blur-xl p-6">
-          <div className="max-w-md w-full bg-[#0a0a0a] border border-fuchsia-500/30 rounded-[2.5rem] p-10 flex flex-col items-center text-center gap-8 shadow-[0_0_100px_rgba(217,70,239,0.1)]">
-            <div className="w-20 h-20 bg-fuchsia-500/10 rounded-full flex items-center justify-center text-fuchsia-500"><AlertTriangle size={44} /></div>
-            <div className="space-y-3">
-              <h2 className="text-xl font-black uppercase tracking-widest text-white">Dissolve Node?</h2>
-              <p className="text-gray-400 text-xs leading-relaxed">Permanent destruction of molecule: <span className="text-white font-bold">"{notes.find(n => n.id === confirmDeleteId)?.title}"</span>.</p>
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6">
+          <div className="max-w-sm w-full bg-[#0a0a0a] border border-white/10 rounded-2xl p-6 flex flex-col gap-4 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+            <div className="space-y-2">
+              <h2 className="text-base font-bold text-white">Delete Note?</h2>
+              <p className="text-gray-400 text-sm">
+                "{notes.find(n => n.id === confirmDeleteId)?.title}" will be permanently removed.
+              </p>
             </div>
-            <div className="w-full flex flex-col gap-4">
-              <button onClick={() => { updateData({ notes: notes.filter(n => n.id !== confirmDeleteId), connections: connections.filter(c => c.from !== confirmDeleteId && c.to !== confirmDeleteId) }); setConfirmDeleteId(null); }} className="w-full h-14 bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-black uppercase tracking-widest rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-95 shadow-lg">Dissolve</button>
-              <button onClick={() => setConfirmDeleteId(null)} className="w-full h-14 bg-white/5 hover:bg-white/10 text-gray-400 font-black uppercase tracking-widest rounded-2xl border border-white/5 transition-all">Preserve</button>
+            <div className="flex gap-3">
+              <button onClick={() => { updateData({ notes: notes.filter(n => n.id !== confirmDeleteId), connections: connections.filter(c => c.from !== confirmDeleteId && c.to !== confirmDeleteId) }); setConfirmDeleteId(null); }} className="flex-1 h-10 bg-red-600 hover:bg-red-500 text-white text-sm font-bold rounded-lg transition-all">
+                Delete
+              </button>
+              <button onClick={() => setConfirmDeleteId(null)} className="flex-1 h-10 bg-white/5 hover:bg-white/10 text-gray-300 text-sm font-bold rounded-lg transition-all">
+                Cancel
+              </button>
             </div>
           </div>
         </div>

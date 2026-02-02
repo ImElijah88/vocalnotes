@@ -1,5 +1,5 @@
 
-export type NoteType = 'idea' | 'step' | 'note' | 'cost' | 'tool' | 'actor';
+export type NoteType = 'idea' | 'step' | 'note' | 'cost' | 'tool' | 'actor' | 'task';
 export type LineType = 'solid' | 'dashed' | 'dotted' | 'arrow' | 'double' | 'glow' | 'cable';
 
 export interface Note {

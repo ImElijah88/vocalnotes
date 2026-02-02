@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Mic, Square, Save, Sparkles, Loader2, Info, Maximize, Minimize, AlertCircle } from 'lucide-react';
+import { X, Mic, Square, Save, Sparkles, Loader2, Info, Maximize, Minimize, AlertCircle, Wand2, Copy, Plus } from 'lucide-react';
 import { useGeminiLive } from '../hooks/useGeminiLive';
 import { useSpeechToText } from '../hooks/useSpeechToText';
 import { refineNoteText, RefineError } from '../services/geminiService';
@@ -11,14 +11,22 @@ interface NoteModalProps {
   note: Note;
   onSave: (note: Note) => void;
   onClose: () => void;
+  onCreateNote?: (content: string, title: string) => void;
   apiKey?: string;
   liveModelName?: string;
   refinementModelName?: string;
 }
 
-const NoteModal: React.FC<NoteModalProps> = ({ note, onSave, onClose, apiKey = '', liveModelName = 'gemini-2.5-flash-native-audio-preview-12-2025', refinementModelName = 'gemini-1.5-flash-latest' }) => {
+interface Tab {
+  id: string;
+  label: string;
+  content: string;
+}
+
+const NoteModal: React.FC<NoteModalProps> = ({ note, onSave, onClose, onCreateNote, apiKey = '', liveModelName = 'gemini-2.5-flash-native-audio-preview-12-2025', refinementModelName = 'gemini-1.5-flash-latest' }) => {
   const [title, setTitle] = useState(note.title);
-  const [content, setContent] = useState(note.content);
+  const [tabs, setTabs] = useState<Tab[]>([{ id: 'original', label: 'Original', content: note.content }]);
+  const [activeTabId, setActiveTabId] = useState('original');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [isInternalFullscreen, setIsInternalFullscreen] = useState(false);
@@ -26,6 +34,14 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, onSave, onClose, apiKey = '
   const [refineRetryHint, setRefineRetryHint] = useState<string | null>(null);
   const [quotaCountdown, setQuotaCountdown] = useState<number | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
+  const [showRefineConfirm, setShowRefineConfirm] = useState(false);
+  const [showPromptMenu, setShowPromptMenu] = useState(false);
+  const [showRefineMenu, setShowRefineMenu] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
+  
+  const content = tabs.find(t => t.id === activeTabId)?.content || '';
+  const activeTab = tabs.find(t => t.id === activeTabId);
+  const originalContent = tabs.find(t => t.id === 'original')?.content || '';
   
   // High-fidelity Gemini Live — uses BYOK from User Hub
   const { 
@@ -47,6 +63,9 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, onSave, onClose, apiKey = '
   
   const baseContentRef = useRef(note.content);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const lastGeminiTranscriptRef = useRef('');
+  const lastNativeTranscriptRef = useRef('');
+  const isUserEditingRef = useRef(false);
 
   const isRecording = isGeminiLive || isNativeListening;
 
@@ -57,16 +76,28 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, onSave, onClose, apiKey = '
   };
 
   useEffect(() => {
-    if (isGeminiLive) {
-      const spacing = baseContentRef.current && !baseContentRef.current.endsWith('\n') ? '\n' : '';
-      setContent(baseContentRef.current + spacing + geminiTranscript);
+    if (isGeminiLive && geminiTranscript && !isUserEditingRef.current) {
+      // Only append the NEW portion of transcript
+      const newPortion = geminiTranscript.slice(lastGeminiTranscriptRef.current.length);
+      if (newPortion) {
+        lastGeminiTranscriptRef.current = geminiTranscript;
+        const newContent = baseContentRef.current + newPortion;
+        setTabs(prev => prev.map(t => t.id === 'original' ? { ...t, content: newContent } : t));
+        baseContentRef.current = newContent;
+      }
     }
   }, [geminiTranscript, isGeminiLive]);
 
   useEffect(() => {
-    if (isNativeListening) {
-      const spacing = baseContentRef.current && !baseContentRef.current.endsWith('\n') ? '\n' : '';
-      setContent(baseContentRef.current + spacing + nativeTranscript);
+    if (isNativeListening && nativeTranscript && !isUserEditingRef.current) {
+      // Only append the NEW portion of transcript
+      const newPortion = nativeTranscript.slice(lastNativeTranscriptRef.current.length);
+      if (newPortion) {
+        lastNativeTranscriptRef.current = nativeTranscript;
+        const newContent = baseContentRef.current + newPortion;
+        setTabs(prev => prev.map(t => t.id === 'original' ? { ...t, content: newContent } : t));
+        baseContentRef.current = newContent;
+      }
     }
   }, [nativeTranscript, isNativeListening]);
 
@@ -85,25 +116,81 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, onSave, onClose, apiKey = '
   }, [quotaCountdown]);
 
   const handleStartRecording = () => {
-    baseContentRef.current = content;
+    const currentContent = originalContent;
+    // Add spacing only when starting a NEW recording session
+    const spacing = currentContent && !currentContent.endsWith('\n') ? '\n\n' : '';
+    baseContentRef.current = currentContent + spacing;
+    lastGeminiTranscriptRef.current = '';
+    lastNativeTranscriptRef.current = '';
+    isUserEditingRef.current = false;
     setLiveTranscript('');
     startLiveSession();
   };
 
-  const handleStopRecording = async () => {
+  const handleStopRecording = () => {
     if (isGeminiLive) stopLiveSession();
     if (isNativeListening) stopNativeListening();
+  };
 
+  const handleManualRefine = () => {
+    if (!content.trim() || isProcessing) return;
+    setShowRefineMenu(!showRefineMenu);
+  };
+
+  const confirmRefine = async (audience: string) => {
+    setShowRefineMenu(false);
     setIsProcessing(true);
     setRefineError(null);
     setRefineRetryHint(null);
     setQuotaCountdown(null);
+
+    const audiencePrompts: Record<string, string> = {
+      'academic': `Fix grammar and improve clarity using formal academic language. Preserve all technical terms and key details. Output plain text only—no markdown, hashtags, or conversational phrases like "Here's" or "I've". Maintain the full length and depth of the original:\n\n${originalContent}`,
+      'simple': `Rewrite in simple everyday language that anyone can understand. Replace complex words: "user"→"you", "implement"→"do", "retain"→"keep", "generate"→"make", "utilize"→"use", "currently"→"now", "impossible"→"can't". Keep all important details. Output plain text only—no markdown or phrases like "Here's":\n\n${originalContent}`,
+      'professional': `Fix grammar and refine using clear professional business language. Balance formality with accessibility. Preserve all key information. Output plain text only—no markdown, hashtags, or conversational phrases:\n\n${originalContent}`,
+      'technical': `Fix grammar and enhance using precise technical vocabulary for expert audiences. Keep all specifications and details intact. Output plain text only—no markdown or conversational phrases:\n\n${originalContent}`,
+      'casual': `Fix grammar and rewrite in a friendly, conversational tone. Keep it natural and relaxed while preserving all important points. Output plain text only—no markdown or phrases like "Here's":\n\n${originalContent}`,
+    };
+
     try {
-      const refined = await refineNoteText(content, { apiKey, modelName: refinementModelName });
+      const prompt = audiencePrompts[audience] || audiencePrompts['professional'];
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${refinementModelName}:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.5, maxOutputTokens: 8192 }
+        })
+      });
+
+      if (!response.ok) throw new Error('Refinement failed');
+      const data = await response.json();
+      let refined = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      
       if (refined) {
-        setContent(refined);
-        baseContentRef.current = refined;
-        onSave({ ...note, title, content: refined });
+        refined = refined
+          .replace(/#{1,6}\s/g, '')
+          .replace(/\*\*([^*]+)\*\*/g, '$1')
+          .replace(/\*([^*]+)\*/g, '$1')
+          .replace(/^(Here's|Here is|I've|I have|Sure|Certainly).+?:\s*/gim, '')
+          .trim();
+        
+        const tabLabels: Record<string, string> = {
+          'simple': 'Simple',
+          'casual': 'Casual',
+          'professional': 'Pro',
+          'academic': 'Academic',
+          'technical': 'Tech'
+        };
+        
+        const newTab: Tab = {
+          id: `refine-${Date.now()}`,
+          label: tabLabels[audience] || 'Refined',
+          content: refined
+        };
+        
+        setTabs(prev => [...prev, newTab]);
+        setActiveTabId(newTab.id);
       }
     } catch (err) {
       if (err instanceof RefineError) {
@@ -118,58 +205,110 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, onSave, onClose, apiKey = '
     }
   };
 
-  const handleManualRefine = async () => {
-    if (!content.trim() || isProcessing) return;
+  const handlePromptTransform = async (scenario: string) => {
+    setShowPromptMenu(false);
+    if (!originalContent.trim() || isProcessing) return;
     setIsProcessing(true);
     setRefineError(null);
     setRefineRetryHint(null);
     setQuotaCountdown(null);
+
+    const prompts: Record<string, string> = {
+      'app': `Transform this into a structured app development prompt. Include: Goal, Core Features, Technical Requirements, User Flow. Use simple bullets. Output plain text only—no markdown or conversational phrases:\n\n${originalContent}`,
+      'design': `Transform this into a structured design prompt. Include: Visual Goal, Layout Structure, Color Palette, UX Priorities. Use simple bullets. Output plain text only—no markdown or conversational phrases:\n\n${originalContent}`,
+      'content': `Transform this into a structured content creation prompt. Include: Goal, Target Audience, Tone/Voice, Key Points, Format. Use simple bullets. Output plain text only—no markdown or conversational phrases:\n\n${originalContent}`,
+      'research': `Transform this into a structured research prompt. Include: Research Goal, Key Questions, Methodology, Expected Outcome. Use simple bullets. Output plain text only—no markdown or conversational phrases:\n\n${originalContent}`,
+      'marketing': `Transform this into a structured marketing prompt. Include: Campaign Goal, Target Audience, Channels, Core Message, Success Metrics. Use simple bullets. Output plain text only—no markdown or conversational phrases:\n\n${originalContent}`,
+    };
+
     try {
-      const refined = await refineNoteText(content, { apiKey, modelName: refinementModelName });
-      if (refined) {
-        setContent(refined);
-        baseContentRef.current = refined;
+      const systemPrompt = prompts[scenario] || prompts['app'];
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${refinementModelName}:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: systemPrompt }] }],
+          generationConfig: { temperature: 0.6, maxOutputTokens: 4096 }
+        })
+      });
+
+      if (!response.ok) throw new Error('Prompt transformation failed');
+      const data = await response.json();
+      let transformed = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      
+      if (transformed) {
+        transformed = transformed
+          .replace(/#{1,6}\s/g, '')
+          .replace(/\*\*([^*]+)\*\*/g, '$1')
+          .replace(/\*([^*]+)\*/g, '$1')
+          .replace(/^(Here's|Here is|I've|I have|Sure|Certainly).+?:\s*/gim, '')
+          .trim();
+        
+        const tabLabels: Record<string, string> = {
+          'app': 'App',
+          'design': 'Design',
+          'content': 'Content',
+          'research': 'Research',
+          'marketing': 'Marketing'
+        };
+        
+        const newTab: Tab = {
+          id: `prompt-${Date.now()}`,
+          label: tabLabels[scenario] || 'Prompt',
+          content: transformed
+        };
+        
+        setTabs(prev => [...prev, newTab]);
+        setActiveTabId(newTab.id);
       }
     } catch (err) {
-      if (err instanceof RefineError) {
-        setRefineError(err.info.message);
-        setRefineRetryHint(err.info.retryHint ?? null);
-        if (err.info.code === 'quota') setQuotaCountdown(60);
-      } else {
-        setRefineError(err instanceof Error ? err.message : 'Refinement failed. Check User Hub settings.');
-      }
+      setRefineError(err instanceof Error ? err.message : 'Prompt transformation failed');
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleSave = () => {
-    onSave({ ...note, title, content });
+    onSave({ ...note, title, content: originalContent });
     onClose();
   };
 
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newVal = e.target.value;
-    setContent(newVal);
+    isUserEditingRef.current = true;
+    setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, content: newVal } : t));
     
-    if (isGeminiLive || isNativeListening) {
-      const activeTrans = isGeminiLive ? geminiTranscript : nativeTranscript;
-      const transcriptStartIdx = newVal.lastIndexOf(activeTrans);
-      if (transcriptStartIdx !== -1 && activeTrans.length > 0) {
-        baseContentRef.current = newVal.substring(0, transcriptStartIdx).trimEnd();
-      } else if (activeTrans.length === 0) {
-        baseContentRef.current = newVal;
-      }
-    } else {
+    if (activeTabId === 'original') {
       baseContentRef.current = newVal;
+    }
+    
+    // Re-enable auto-append after 500ms of no typing
+    setTimeout(() => {
+      isUserEditingRef.current = false;
+    }, 500);
+  };
+
+  const handleCopyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  const handleCreateNoteFromTab = () => {
+    if (onCreateNote && activeTab && activeTab.id !== 'original') {
+      onCreateNote(content, activeTab.label);
     }
   };
 
   const timerColorClass = elapsedSeconds >= 590 
     ? 'text-red-500' 
     : elapsedSeconds >= 540 
-      ? 'text-amber-500' 
-      : 'text-cyan-500';
+      ? 'text-red-400' 
+      : 'text-red-500';
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300 p-4">
@@ -181,53 +320,109 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, onSave, onClose, apiKey = '
         }`}
       >
         {/* Header */}
-        <header className="flex items-center justify-between px-3 h-16 border-b border-white/5 bg-black/80 backdrop-blur-xl z-20">
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            <input 
-              type="text" 
-              value={title} 
-              onChange={(e) => setTitle(e.target.value)}
-              className="bg-transparent text-lg font-black uppercase tracking-widest outline-none w-full focus:ring-0 placeholder:text-gray-800 ml-4"
-              style={{ color: note.color }}
-              placeholder="Node Title..."
-            />
+        <header className="flex flex-col px-3 border-b border-white/5 bg-black/80 backdrop-blur-xl z-20">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <input 
+                type="text" 
+                value={title} 
+                onChange={(e) => setTitle(e.target.value)}
+                className="bg-transparent text-lg font-black uppercase tracking-widest outline-none w-full focus:ring-0 placeholder:text-gray-800 ml-4"
+                style={{ color: note.color }}
+                placeholder="Node Title..."
+              />
+              
+              {isRecording && (
+                <div className="flex items-center gap-2 px-3 py-1.5 border border-cyan-500/20 bg-cyan-500/5 rounded-xl animate-pulse shrink-0">
+                  <div className={`w-2 h-2 rounded-full ${isGeminiLive ? 'bg-cyan-500' : 'bg-white/50'}`} />
+                  <span className="text-[8px] font-black uppercase tracking-widest text-cyan-500">
+                    {isGeminiLive ? 'Neural' : 'Native'}
+                  </span>
+                  {isGeminiLive && (
+                    <div className={`flex items-center gap-1 text-xs font-mono ml-1 ${timerColorClass}`}>
+                      {formatTime(elapsedSeconds)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-0.5 shrink-0 ml-2">
+              <button 
+                onClick={() => setIsInfoOpen(true)}
+                className="w-[44px] h-[44px] flex items-center justify-center text-gray-600 hover:text-cyan-400 transition-colors"
+              >
+                <Info size={20} />
+              </button>
+
+              <button 
+                onClick={() => setIsInternalFullscreen(!isInternalFullscreen)}
+                className="w-[44px] h-[44px] flex items-center justify-center text-gray-600 hover:text-cyan-400 transition-colors"
+              >
+                {isInternalFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
+              </button>
+
+              <button 
+                onClick={onClose} 
+                className="w-[44px] h-[44px] flex items-center justify-center text-gray-400 hover:text-white transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex items-center justify-between gap-2 pb-2">
+            <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide flex-1">
+            {tabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTabId(tab.id)}
+                className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all shrink-0 ${
+                  activeTabId === tab.id
+                    ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                    : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
+                }`}
+              >
+                {tab.label}
+                {tab.id !== 'original' && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setTabs(prev => prev.filter(t => t.id !== tab.id));
+                      if (activeTabId === tab.id) setActiveTabId('original');
+                    }}
+                    className="ml-2 text-gray-600 hover:text-red-400"
+                  >
+                    ×
+                  </button>
+                )}
+              </button>
+            ))}
+            </div>
             
-            {isRecording && (
-              <div className="flex items-center gap-2 px-3 py-1.5 border border-cyan-500/20 bg-cyan-500/5 rounded-xl animate-pulse shrink-0">
-                <div className={`w-2 h-2 rounded-full ${isGeminiLive ? 'bg-cyan-500' : 'bg-white/50'}`} />
-                <span className="text-[8px] font-black uppercase tracking-widest text-cyan-500">
-                  {isGeminiLive ? 'Neural' : 'Native'}
-                </span>
-                {isGeminiLive && (
-                  <div className={`flex items-center gap-1 text-xs font-mono ml-1 ${timerColorClass}`}>
-                    {formatTime(elapsedSeconds)}
-                  </div>
+            {activeTabId !== 'original' && (
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={handleCopyToClipboard}
+                  className="h-8 px-3 flex items-center gap-1.5 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-lg transition-all text-xs font-bold uppercase tracking-wider"
+                  title="Copy to clipboard"
+                >
+                  <Copy size={14} />
+                  {copySuccess ? 'Copied!' : 'Copy'}
+                </button>
+                {onCreateNote && (
+                  <button
+                    onClick={handleCreateNoteFromTab}
+                    className="h-8 px-3 flex items-center gap-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg transition-all text-xs font-bold uppercase tracking-wider shadow-lg"
+                    title="Create new note on canvas"
+                  >
+                    <Plus size={14} />
+                    Create Note
+                  </button>
                 )}
               </div>
             )}
-          </div>
-
-          <div className="flex items-center gap-0.5 shrink-0 ml-2">
-            <button 
-              onClick={() => setIsInfoOpen(true)}
-              className="w-[44px] h-[44px] flex items-center justify-center text-gray-600 hover:text-cyan-400 transition-colors"
-            >
-              <Info size={20} />
-            </button>
-
-            <button 
-              onClick={() => setIsInternalFullscreen(!isInternalFullscreen)}
-              className="w-[44px] h-[44px] flex items-center justify-center text-gray-600 hover:text-cyan-400 transition-colors"
-            >
-              {isInternalFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
-            </button>
-
-            <button 
-              onClick={onClose} 
-              className="w-[44px] h-[44px] flex items-center justify-center text-gray-400 hover:text-white transition-colors"
-            >
-              <X size={20} />
-            </button>
           </div>
         </header>
 
@@ -269,14 +464,67 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, onSave, onClose, apiKey = '
               </button>
             )}
             
-            <button 
-              onClick={handleManualRefine}
-              disabled={isProcessing || isRecording || !content.trim()}
-              className="w-[44px] h-[44px] border border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/10 rounded-full flex items-center justify-center transition-all active:scale-90 disabled:opacity-20"
-              title="Refine with Gemini"
-            >
-              <Sparkles size={20} />
-            </button>
+            <div className="relative">
+              <button 
+                onClick={handleManualRefine}
+                disabled={isProcessing || isRecording || !content.trim()}
+                className="w-[44px] h-[44px] border border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/10 rounded-full flex items-center justify-center transition-all active:scale-90 disabled:opacity-20"
+                title="Refine Text"
+              >
+                <Sparkles size={20} />
+              </button>
+
+              {showRefineMenu && (
+                <div className="absolute bottom-full left-0 mb-2 bg-[#0a0a0a] border border-cyan-500/30 rounded-xl p-2 shadow-[0_0_30px_rgba(0,255,255,0.2)] min-w-[140px] z-50">
+                  {[
+                    { id: 'simple', label: 'Simple' },
+                    { id: 'casual', label: 'Casual' },
+                    { id: 'professional', label: 'Professional' },
+                    { id: 'academic', label: 'Academic' },
+                    { id: 'technical', label: 'Technical' },
+                  ].map(opt => (
+                    <button
+                      key={opt.id}
+                      onClick={() => confirmRefine(opt.id)}
+                      className="w-full px-3 py-2 text-left text-xs font-bold text-gray-300 hover:bg-cyan-500/10 hover:text-cyan-400 rounded-lg transition-all"
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="relative">
+              <button 
+                onClick={() => setShowPromptMenu(!showPromptMenu)}
+                disabled={isProcessing || isRecording || !content.trim()}
+                className="w-[44px] h-[44px] border border-fuchsia-500/20 text-fuchsia-400 hover:bg-fuchsia-500/10 rounded-full flex items-center justify-center transition-all active:scale-90 disabled:opacity-20"
+                title="Transform to Prompt"
+              >
+                <Wand2 size={20} />
+              </button>
+
+              {showPromptMenu && (
+                <div className="absolute bottom-full left-0 mb-2 bg-[#0a0a0a] border border-fuchsia-500/30 rounded-xl p-2 shadow-[0_0_30px_rgba(217,70,239,0.2)] min-w-[140px] z-50">
+                  {[
+                    { id: 'app', label: 'App Dev' },
+                    { id: 'design', label: 'Design' },
+                    { id: 'content', label: 'Content' },
+                    { id: 'research', label: 'Research' },
+                    { id: 'marketing', label: 'Marketing' },
+                  ].map(opt => (
+                    <button
+                      key={opt.id}
+                      onClick={() => handlePromptTransform(opt.id)}
+                      className="w-full px-3 py-2 text-left text-xs font-bold text-gray-300 hover:bg-fuchsia-500/10 hover:text-fuchsia-400 rounded-lg transition-all"
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <button 

@@ -1,9 +1,18 @@
 
 import React, { useState, useEffect } from 'react';
-import { X, CheckCircle2, User, Shield, Zap, LogOut, Info, AlertTriangle, Key, Eye, EyeOff, ExternalLink, Plus, Edit3, Trash2, CheckSquare, Square } from 'lucide-react';
+import { X, CheckCircle2, User, Shield, Zap, LogOut, Info, AlertTriangle, Key, Eye, EyeOff, ExternalLink, Plus, Edit3, Trash2, CheckSquare, Square, Image as ImageIcon, Palette } from 'lucide-react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { GeminiConfig } from '../types'; // Import GeminiConfig type
 import { v4 as uuidv4 } from 'uuid'; // For generating unique IDs
+import ColorPicker from './ColorPicker';
+
+const DEFAULT_BACKGROUNDS = [
+  { id: 'grid', name: 'Grid', value: 'radial-gradient(circle, #1a1a1a 1px, rgba(0, 0, 0, 0) 1px)', size: '30px 30px' },
+  { id: 'dots', name: 'Dots', value: 'radial-gradient(circle, #2a2a2a 2px, transparent 2px)', size: '40px 40px' },
+  { id: 'lines', name: 'Lines', value: 'repeating-linear-gradient(0deg, transparent, transparent 29px, #1a1a1a 29px, #1a1a1a 30px)', size: 'auto' },
+  { id: 'solid', name: 'Solid', value: '#050505', size: 'auto' },
+  { id: 'spline1', name: 'Black Hole', value: 'https://my.spline.design/blackhole-P8xBUx7R2aecELsor3E9OaRQ/', size: 'auto', type: 'spline' },
+];
 
 const DEFAULT_LIVE = 'gemini-2.5-flash-native-audio-preview-12-2025';
 const DEFAULT_REFINEMENT = 'gemini-1.5-flash-latest';
@@ -48,6 +57,12 @@ interface SettingsModalProps {
   onSaveConfig: (config: GeminiConfig) => void;
   onDeleteConfig: (configId: string) => void;
   onSetActiveConfig: (configId: string) => void;
+  // Background props
+  activeBackground: string;
+  customBackgrounds: string[];
+  onSetBackground: (bg: string) => void;
+  onAddCustomBackground: (bg: string) => void;
+  onDeleteCustomBackground: (bg: string) => void;
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ 
@@ -59,9 +74,18 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   activeGeminiConfigId,
   onSaveConfig,
   onDeleteConfig,
-  onSetActiveConfig
+  onSetActiveConfig,
+  activeBackground,
+  customBackgrounds,
+  onSetBackground,
+  onAddCustomBackground,
+  onDeleteCustomBackground
 }) => {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [tempBgColor, setTempBgColor] = useState('#050505');
+  const [showBackgroundMenu, setShowBackgroundMenu] = useState(false);
+  const [selectedBgOption, setSelectedBgOption] = useState<string | null>(null);
   
   const [editingConfig, setEditingConfig] = useState<GeminiConfig | null>(null);
   const [configNameInput, setConfigNameInput] = useState('');
@@ -73,6 +97,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const [showApiKey, setShowApiKey] = useState(false);
   const [isKeyActive, setIsKeyActive] = useState(false);
+  const [confirmDeleteConfigId, setConfirmDeleteConfigId] = useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const isLiveCustom = selectedLiveModel === 'custom';
   const isRefinementCustom = selectedRefinementModel === 'custom';
@@ -125,6 +151,42 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleCancelEdit = () => setEditingConfig(null);
+
+  const handleUploadBackground = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (!file.type.startsWith('image/')) {
+      alert('Please upload an image file (JPG, PNG, WebP)');
+      return;
+    }
+    
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image must be under 5MB');
+      return;
+    }
+    
+    if (customBackgrounds.length >= 1) {
+      alert('Maximum 1 custom background allowed. Delete existing one first.');
+      return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        if (img.width > 1920 || img.height > 1080) {
+          alert('Image resolution must be 1920x1080 or smaller');
+          return;
+        }
+        const dataUrl = event.target?.result as string;
+        onAddCustomBackground(dataUrl);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
 
   const handleAddConfig = () => {
     setEditingConfig({
@@ -183,11 +245,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
         
         <header className="px-8 py-6 border-b border-white/5 flex items-center justify-between bg-black/40 shrink-0 relative z-30">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 bg-amber-500/10 rounded-xl flex items-center justify-center text-amber-500 border border-amber-500/20">
-              <User size={24} />
+            <div className="w-11 h-11 bg-amber-500/10 rounded-xl flex items-center justify-center text-amber-500 border border-amber-500/20 overflow-hidden">
+              {user?.photoURL ? (
+                <img src={user.photoURL} className="w-full h-full object-cover" />
+              ) : (
+                <User size={24} />
+              )}
             </div>
             <div>
-              <h2 className="text-sm font-black uppercase tracking-[0.2em] text-white">User Hub</h2>
+              <h2 className="text-sm font-black uppercase tracking-[0.2em] text-white">{user?.displayName || 'Guest Fragment'}</h2>
               <p className="text-[10px] text-amber-500/60 font-bold tracking-widest uppercase">Neural command</p>
             </div>
           </div>
@@ -198,31 +264,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
         </header>
 
         <div className="flex-1 overflow-y-auto p-8 space-y-10 scrollbar-hide">
-          {/* Identity Section */}
-          <section className="space-y-6">
-            <div className="flex items-center gap-3 text-amber-500">
-              <Shield size={16} />
-              <h3 className="text-[10px] font-black uppercase tracking-widest">Authentication</h3>
-            </div>
-            <div className="bg-white/5 rounded-2xl p-6 border border-white/5 flex items-center gap-5">
-              <div className="w-14 h-14 rounded-full border-2 border-amber-500/30 overflow-hidden bg-black flex items-center justify-center">
-                {user?.photoURL ? (
-                  <img src={user.photoURL} className="w-full h-full object-cover" />
-                ) : (
-                  <User size={24} className="text-gray-700" />
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-lg font-black uppercase tracking-tight text-white truncate">
-                  {user?.displayName || 'Guest Fragment'}
-                </div>
-                <div className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">
-                  {isGuest ? 'LOCAL_VOLATILE_STORAGE' : (user?.email || 'AUTHENTICATED_SECURE')}
-                </div>
-              </div>
-            </div>
-          </section>
-
           {/* BYOK / API Management Section */}
           <section className="space-y-6">
             <div className="flex items-center justify-between">
@@ -392,7 +433,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                             <button onClick={() => handleEditConfig(config)} className="text-gray-400 hover:text-white">
                               <Edit3 size={18} />
                             </button>
-                            <button onClick={() => onDeleteConfig(config.id)} className="text-gray-400 hover:text-red-500">
+                            <button onClick={() => setConfirmDeleteConfigId(config.id)} className="text-gray-400 hover:text-red-500">
                               <Trash2 size={18} />
                             </button>
                           </div>
@@ -408,6 +449,116 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                     <span className="text-[10px] font-black uppercase tracking-[0.2em]">Add New Config</span>
                   </button>
                 </>
+              )}
+            </div>
+          </section>
+
+          {/* Background Section */}
+          <section className="space-y-6">
+            <div className="flex items-center gap-3 text-purple-400">
+              <ImageIcon size={16} />
+              <h3 className="text-[10px] font-black uppercase tracking-widest">Canvas Background</h3>
+            </div>
+            <div className="bg-[#0c0c0c] border border-white/5 rounded-2xl p-6 space-y-4">
+              {!showBackgroundMenu ? (
+                <button
+                  onClick={() => setShowBackgroundMenu(true)}
+                  className="w-full h-16 rounded-xl border-2 border-white/10 hover:border-purple-500/50 transition-all relative overflow-hidden group"
+                  style={(() => {
+                    const defaultBgs: Record<string, any> = {
+                      grid: { backgroundImage: 'radial-gradient(circle, #1a1a1a 1px, rgba(0, 0, 0, 0) 1px)', backgroundSize: '30px 30px' },
+                      dots: { backgroundImage: 'radial-gradient(circle, #2a2a2a 2px, transparent 2px)', backgroundSize: '40px 40px' },
+                      lines: { backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 29px, #1a1a1a 29px, #1a1a1a 30px)' },
+                      solid: { backgroundColor: '#050505' },
+                    };
+                    if (defaultBgs[activeBackground]) return defaultBgs[activeBackground];
+                    if (activeBackground.startsWith('#')) return { backgroundColor: activeBackground };
+                    return { backgroundImage: `url(${activeBackground})`, backgroundSize: 'cover', backgroundPosition: 'center' };
+                  })()}
+                >
+                  <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-white">Change</span>
+                  </div>
+                </button>
+              ) : !selectedBgOption ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    {DEFAULT_BACKGROUNDS.map(bg => (
+                      <button
+                        key={bg.id}
+                        onClick={() => setSelectedBgOption(bg.id)}
+                        className="h-16 rounded-lg border border-white/10 hover:border-purple-500/50 transition-all relative overflow-hidden"
+                        style={{ background: bg.value, backgroundSize: bg.size }}
+                      >
+                        <div className="absolute inset-0 bg-black/40 hover:bg-black/20 transition-colors flex items-center justify-center">
+                          <span className="text-[7px] font-black uppercase text-white">{bg.name}</span>
+                        </div>
+                      </button>
+                    ))}
+                    {customBackgrounds.map((bg, idx) => (
+                      <button
+                        key={`custom-${idx}`}
+                        onClick={() => setSelectedBgOption(bg)}
+                        className="h-16 rounded-lg border border-white/10 hover:border-purple-500/50 transition-all"
+                        style={{ backgroundImage: `url(${bg})`, backgroundSize: 'cover', backgroundPosition: 'center' }}
+                      />
+                    ))}
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={customBackgrounds.length >= 1}
+                      className={`h-16 rounded-lg border border-dashed transition-all flex flex-col items-center justify-center text-[7px] font-bold uppercase ${
+                        customBackgrounds.length >= 1 ? 'border-white/10 text-gray-600 cursor-not-allowed' : 'border-white/20 hover:border-purple-500/50 text-gray-400 hover:text-purple-400'
+                      }`}
+                      title="JPG/PNG/WebP, max 5MB, 1920x1080"
+                    >
+                      <Plus size={16} />
+                      <span className="mt-1">Upload</span>
+                    </button>
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={handleUploadBackground}
+                    className="hidden"
+                  />
+                  <button onClick={() => setShowBackgroundMenu(false)} className="w-full text-[8px] text-gray-500 hover:text-white uppercase font-black tracking-widest">
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div 
+                    className="h-24 rounded-lg border border-purple-500/30 relative overflow-hidden"
+                    style={(() => {
+                      const bg = DEFAULT_BACKGROUNDS.find(b => b.id === selectedBgOption);
+                      if (bg) return { background: bg.value, backgroundSize: bg.size };
+                      if (selectedBgOption.startsWith('#')) return { backgroundColor: selectedBgOption };
+                      return { backgroundImage: `url(${selectedBgOption})`, backgroundSize: 'cover', backgroundPosition: 'center' };
+                    })()}
+                  >
+                    <button
+                      onClick={() => setShowColorPicker(true)}
+                      className="absolute top-2 right-2 w-8 h-8 bg-black/80 hover:bg-black rounded-lg flex items-center justify-center text-purple-400 transition-all"
+                    >
+                      <Palette size={14} />
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { onSetBackground(selectedBgOption); setShowBackgroundMenu(false); setSelectedBgOption(null); }}
+                      className="flex-1 h-10 bg-purple-600 hover:bg-purple-500 text-white text-[9px] font-black uppercase tracking-widest rounded-lg transition-all"
+                    >
+                      Apply
+                    </button>
+                    <button
+                      onClick={() => setSelectedBgOption(null)}
+                      className="flex-1 h-10 bg-white/5 hover:bg-white/10 text-gray-400 text-[9px] font-black uppercase tracking-widest rounded-lg"
+                    >
+                      Back
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           </section>
@@ -458,6 +609,42 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </footer>
       </div>
+      
+      {showColorPicker && (
+        <ColorPicker
+          currentColor={tempBgColor}
+          savedColors={['#050505', '#0a0a0a', '#1a1a1a', '#2a2a2a']}
+          onColorSelect={setTempBgColor}
+          onSave={(color) => {
+            setSelectedBgOption(color);
+            setShowColorPicker(false);
+          }}
+          onClose={() => setShowColorPicker(false)}
+        />
+      )}
+      
+      {confirmDeleteConfigId && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[1700] w-80 bg-[#0a0a0a] border border-red-500/30 rounded-2xl p-6 shadow-[0_0_50px_rgba(239,68,68,0.2)]">
+          <h3 className="text-sm font-bold text-white mb-2">Delete API Config?</h3>
+          <p className="text-xs text-gray-400 mb-4">
+            "{geminiConfigs.find(c => c.id === confirmDeleteConfigId)?.name}" will be removed.
+          </p>
+          <div className="flex gap-3">
+            <button 
+              onClick={() => { onDeleteConfig(confirmDeleteConfigId); setConfirmDeleteConfigId(null); }}
+              className="flex-1 h-10 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-lg transition-all"
+            >
+              Delete
+            </button>
+            <button 
+              onClick={() => setConfirmDeleteConfigId(null)}
+              className="flex-1 h-10 bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-bold rounded-lg transition-all"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

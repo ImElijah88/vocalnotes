@@ -14,6 +14,7 @@ const ColorPicker: React.FC<ColorPickerProps> = ({ currentColor, savedColors, on
   const [hue, setHue] = useState(0);
   const [satVal, setSatVal] = useState({ s: 100, v: 100 });
   const [tempColor, setTempColor] = useState(currentColor);
+  const [isEditingHex, setIsEditingHex] = useState(false);
   
   const boxRef = useRef<HTMLDivElement>(null);
   const hueRef = useRef<HTMLDivElement>(null);
@@ -51,6 +52,21 @@ const ColorPicker: React.FC<ColorPickerProps> = ({ currentColor, savedColors, on
     onColorSelect(hex);
   }, [hue, satVal]);
 
+  const handleEyeDropper = async () => {
+    if (!('EyeDropper' in window)) {
+      alert('EyeDropper not supported in this browser');
+      return;
+    }
+    try {
+      const eyeDropper = new (window as any).EyeDropper();
+      const result = await eyeDropper.open();
+      setTempColor(result.sRGBHex);
+      onColorSelect(result.sRGBHex);
+    } catch (e) {
+      // User cancelled
+    }
+  };
+
   return (
     <div className="fixed left-24 top-1/2 -translate-y-1/2 z-[200] animate-in slide-in-from-left-4 duration-300">
       <div className="w-64 bg-[#0f0f0f] border border-white/10 rounded-2xl p-5 shadow-[0_0_50px_rgba(0,0,0,0.7)] flex flex-col gap-5 backdrop-blur-2xl">
@@ -73,7 +89,13 @@ const ColorPicker: React.FC<ColorPickerProps> = ({ currentColor, savedColors, on
             document.addEventListener('mousemove', move); 
             document.addEventListener('mouseup', () => document.removeEventListener('mousemove', move), { once: true }); 
           }}
-          className="h-32 rounded-lg relative overflow-hidden shadow-inner border border-white/10 cursor-crosshair"
+          onTouchStart={(e) => {
+            handleBoxMove(e);
+            const move = (te: any) => handleBoxMove(te);
+            document.addEventListener('touchmove', move);
+            document.addEventListener('touchend', () => document.removeEventListener('touchmove', move), { once: true });
+          }}
+          className="h-32 rounded-lg relative overflow-hidden shadow-inner border border-white/10 cursor-crosshair touch-none"
           style={{ backgroundColor: `hsl(${hue}, 100%, 50%)` }}
         >
           <div className="absolute inset-0 bg-gradient-to-r from-white to-transparent" />
@@ -92,7 +114,13 @@ const ColorPicker: React.FC<ColorPickerProps> = ({ currentColor, savedColors, on
             document.addEventListener('mousemove', move); 
             document.addEventListener('mouseup', () => document.removeEventListener('mousemove', move), { once: true }); 
           }}
-          className="h-5 w-full rounded-full bg-gradient-to-r from-red-500 via-yellow-500 via-green-500 via-cyan-500 via-blue-500 to-purple-500 relative cursor-pointer"
+          onTouchStart={(e) => {
+            handleHueMove(e);
+            const move = (te: any) => handleHueMove(te);
+            document.addEventListener('touchmove', move);
+            document.addEventListener('touchend', () => document.removeEventListener('touchmove', move), { once: true });
+          }}
+          className="h-5 w-full rounded-full bg-gradient-to-r from-red-500 via-yellow-500 via-green-500 via-cyan-500 via-blue-500 to-purple-500 relative cursor-pointer touch-none"
         >
           <div 
             className="absolute top-1/2 -translate-y-1/2 w-6 h-6 bg-white rounded-full border border-black/20 shadow-xl -translate-x-1/2 hover:scale-110 transition-transform" 
@@ -103,13 +131,52 @@ const ColorPicker: React.FC<ColorPickerProps> = ({ currentColor, savedColors, on
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 bg-black/40 px-3 py-2 rounded-lg border border-white/5 flex-1">
             <span className="text-white/30 font-mono text-sm">#</span>
-            <input 
-              type="text" 
-              value={tempColor.replace('#', '').toUpperCase()} 
-              readOnly
-              className="bg-transparent text-white font-mono text-sm outline-none w-20 tracking-widest"
-            />
-            <Pipette size={14} className="text-fuchsia-500 opacity-60" />
+            {isEditingHex ? (
+              <input 
+                autoFocus
+                type="text" 
+                defaultValue={tempColor.replace('#', '').toUpperCase()} 
+                onBlur={(e) => {
+                  const val = e.target.value.replace(/[^0-9A-Fa-f]/g, '');
+                  if (val.length === 6) {
+                    const hex = `#${val}`;
+                    setTempColor(hex);
+                    onColorSelect(hex);
+                  }
+                  setIsEditingHex(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const val = e.currentTarget.value.replace(/[^0-9A-Fa-f]/g, '');
+                    if (val.length === 6) {
+                      const hex = `#${val}`;
+                      setTempColor(hex);
+                      onColorSelect(hex);
+                    }
+                    setIsEditingHex(false);
+                  }
+                }}
+                className="bg-transparent text-white font-mono text-sm outline-none w-20 tracking-widest"
+              />
+            ) : (
+              <input 
+                type="text" 
+                value={tempColor.replace('#', '').toUpperCase()} 
+                readOnly
+                onDoubleClick={() => setIsEditingHex(true)}
+                className="bg-transparent text-white font-mono text-sm outline-none w-20 tracking-widest cursor-text"
+              />
+            )}
+            <button 
+              onClick={handleEyeDropper}
+              className="text-fuchsia-500 opacity-60 hover:opacity-100 transition-opacity relative group"
+              title="Pick color from screen"
+            >
+              <Pipette size={14} />
+              <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-2 py-1 bg-black border border-white/10 rounded text-[8px] font-bold uppercase tracking-wider text-white opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+                Pick Color
+              </div>
+            </button>
           </div>
           
           <button 
