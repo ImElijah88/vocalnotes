@@ -1,10 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
-import { X, CheckCircle2, User, Shield, Zap, LogOut, Info, AlertTriangle, Key, Eye, EyeOff, ExternalLink, Plus, Edit3, Trash2, CheckSquare, Square, Image as ImageIcon, Palette } from 'lucide-react';
+import { X, CheckCircle2, User, Shield, Zap, LogOut, Info, AlertTriangle, Key, Eye, EyeOff, ExternalLink, Plus, Edit3, Trash2, CheckSquare, Square, Image as ImageIcon, Palette, Volume2, VolumeX, Vibrate, RotateCcw } from 'lucide-react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { GeminiConfig } from '../types'; // Import GeminiConfig type
 import { v4 as uuidv4 } from 'uuid'; // For generating unique IDs
 import ColorPicker from './ColorPicker';
+import { feedbackSettings } from '../utils/feedback';
 
 const DEFAULT_BACKGROUNDS = [
   { id: 'grid', name: 'Grid', value: 'radial-gradient(circle, #1a1a1a 1px, rgba(0, 0, 0, 0) 1px)', size: '30px 30px' },
@@ -99,6 +100,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isKeyActive, setIsKeyActive] = useState(false);
   const [confirmDeleteConfigId, setConfirmDeleteConfigId] = useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  
+  const [soundEnabled, setSoundEnabled] = useState(feedbackSettings.getSoundEnabled());
+  const [hapticEnabled, setHapticEnabled] = useState(feedbackSettings.getHapticEnabled());
 
   const isLiveCustom = selectedLiveModel === 'custom';
   const isRefinementCustom = selectedRefinementModel === 'custom';
@@ -560,6 +564,76 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 </div>
               )}
+            </div>
+          </section>
+
+          {/* Feedback Settings Section */}
+          <section className="space-y-6">
+            <div className="flex items-center gap-3 text-fuchsia-400">
+              <Volume2 size={16} />
+              <h3 className="text-[10px] font-black uppercase tracking-widest">Feedback Settings</h3>
+            </div>
+            <div className="bg-[#0c0c0c] border border-white/5 rounded-2xl p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {soundEnabled ? <Volume2 size={18} className="text-fuchsia-400" /> : <VolumeX size={18} className="text-gray-600" />}
+                  <div>
+                    <h4 className="text-sm font-bold text-white">Sound Effects</h4>
+                    <p className="text-[10px] text-gray-500">Audio feedback for actions</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    const newValue = !soundEnabled;
+                    setSoundEnabled(newValue);
+                    feedbackSettings.setSoundEnabled(newValue);
+                  }}
+                  className={`w-12 h-6 rounded-full transition-all relative ${
+                    soundEnabled ? 'bg-fuchsia-600' : 'bg-white/10'
+                  }`}
+                >
+                  <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-all ${
+                    soundEnabled ? 'left-6' : 'left-0.5'
+                  }`} />
+                </button>
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Vibrate size={18} className={hapticEnabled ? 'text-fuchsia-400' : 'text-gray-600'} />
+                  <div>
+                    <h4 className="text-sm font-bold text-white">Haptic Feedback</h4>
+                    <p className="text-[10px] text-gray-500">Vibration on touch devices</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    const newValue = !hapticEnabled;
+                    setHapticEnabled(newValue);
+                    feedbackSettings.setHapticEnabled(newValue);
+                  }}
+                  className={`w-12 h-6 rounded-full transition-all relative ${
+                    hapticEnabled ? 'bg-fuchsia-600' : 'bg-white/10'
+                  }`}
+                >
+                  <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-all ${
+                    hapticEnabled ? 'left-6' : 'left-0.5'
+                  }`} />
+                </button>
+              </div>
+              
+              <div className="pt-4 border-t border-white/5">
+                <button
+                  onClick={() => {
+                    feedbackSettings.resetOnboarding();
+                    alert('Onboarding hints reset. Refresh the page to see them again.');
+                  }}
+                  className="w-full h-12 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border border-white/5 rounded-xl flex items-center justify-center gap-2 transition-all text-[10px] font-black uppercase tracking-widest"
+                >
+                  <RotateCcw size={16} />
+                  Reset Onboarding Hints
+                </button>
+              </div>
             </div>
           </section>
 

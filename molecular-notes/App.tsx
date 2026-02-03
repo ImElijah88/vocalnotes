@@ -7,12 +7,15 @@ import ColorPicker from './components/ColorPicker';
 import LandingPage from './components/LandingPage';
 import SettingsModal from './components/SettingsModal';
 import ShareModal from './components/ShareModal';
+import OnboardingHint from './components/OnboardingHint';
+import Toast from './components/Toast';
 import { Folder, Note, Connection, Point, NoteType, LineType, RadialOption, GeminiConfig } from './types';
 import { v4 as uuidv4 } from 'uuid';
 import { Lightbulb, Footprints, FileText, DollarSign, Wrench, User, Trash2, AlertTriangle, CheckSquare } from 'lucide-react';
 import { auth, db, logout } from './services/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { playSound, haptic } from './utils/feedback';
 const MOCK_FOLDERS: Folder[] = [
   { id: 'f1', name: 'Molecular Architecture', order: 0 },
   { id: 'f2', name: 'Project: Neural Interface', order: 1 },
@@ -77,6 +80,10 @@ const App: React.FC = () => {
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [sharingNoteId, setSharingNoteId] = useState<string | null>(null);
+  const [showOnboardingHint, setShowOnboardingHint] = useState(false);
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastKey, setToastKey] = useState(0);
 
   // Background state
   const [activeBackground, setActiveBackground] = useState<string>('grid');
@@ -104,6 +111,16 @@ const App: React.FC = () => {
     });
     return () => unsubAuth();
   }, []);
+
+  // Show onboarding hint for first-time users
+  useEffect(() => {
+    if (!isInitializing && (user || isGuest)) {
+      const hasSeenHint = localStorage.getItem('molecular_onboarding_hint_shown');
+      if (!hasSeenHint) {
+        setTimeout(() => setShowOnboardingHint(true), 1000);
+      }
+    }
+  }, [isInitializing, user, isGuest]);
 
   // Derived active Gemini API key and model name
   const currentActiveGeminiConfig = useMemo(() => {
@@ -567,6 +584,11 @@ const App: React.FC = () => {
             }
           ] 
         });
+        playSound.pop();
+        haptic.light();
+        setToastMessage('Connected ✓');
+        setToastKey(prev => prev + 1);
+        setShowToast(true);
       }
       setConnectingFromId(null);
       setPotentialTargetId(null);
@@ -584,6 +606,11 @@ const App: React.FC = () => {
     updateData({ notes: [...notes, newNote] });
     setIsCreateMenuOpen(false);
     setRadialPos(null);
+    playSound.success();
+    haptic.medium();
+    setToastMessage('Note created ✓');
+    setToastKey(prev => prev + 1);
+    setShowToast(true);
   };
 
   const renderConnection = (conn: Connection) => {
@@ -761,6 +788,7 @@ const App: React.FC = () => {
           activeLineType={activeLineType}
           activeLineThickness={activeLineThickness}
           onOpenSettings={() => setIsSettingsOpen(true)}
+          onShowToast={(msg) => { setToastMessage(msg); setShowToast(true); }}
         />
       )}
 
@@ -952,7 +980,15 @@ const App: React.FC = () => {
               </p>
             </div>
             <div className="flex gap-3">
-              <button onClick={() => { updateData({ notes: notes.filter(n => n.id !== confirmDeleteId), connections: connections.filter(c => c.from !== confirmDeleteId && c.to !== confirmDeleteId) }); setConfirmDeleteId(null); }} className="flex-1 h-10 bg-red-600 hover:bg-red-500 text-white text-sm font-bold rounded-lg transition-all">
+              <button onClick={() => { 
+                updateData({ notes: notes.filter(n => n.id !== confirmDeleteId), connections: connections.filter(c => c.from !== confirmDeleteId && c.to !== confirmDeleteId) }); 
+                setConfirmDeleteId(null);
+                playSound.delete();
+                haptic.strong();
+                setToastMessage('Note deleted');
+                setToastKey(prev => prev + 1);
+                setShowToast(true);
+              }} className="flex-1 h-10 bg-red-600 hover:bg-red-500 text-white text-sm font-bold rounded-lg transition-all">
                 Delete
               </button>
               <button onClick={() => setConfirmDeleteId(null)} className="flex-1 h-10 bg-white/5 hover:bg-white/10 text-gray-300 text-sm font-bold rounded-lg transition-all">
@@ -961,6 +997,20 @@ const App: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+      
+      {showOnboardingHint && (
+        <OnboardingHint
+          message="Long-press anywhere on the canvas to create your first note"
+          onDismiss={() => {
+            setShowOnboardingHint(false);
+            localStorage.setItem('molecular_onboarding_hint_shown', 'true');
+          }}
+        />
+      )}
+      
+      {showToast && (
+        <Toast key={toastKey} message={toastMessage} onClose={() => setShowToast(false)} />
       )}
     </div>
   );

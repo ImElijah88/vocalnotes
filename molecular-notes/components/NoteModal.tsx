@@ -6,6 +6,8 @@ import { useSpeechToText } from '../hooks/useSpeechToText';
 import { refineNoteText, RefineError } from '../services/geminiService';
 import { Note } from '../types';
 import GeminiInfoModal from './GeminiInfoModal';
+import Toast from './Toast';
+import { playSound, haptic } from '../utils/feedback';
 
 interface NoteModalProps {
   note: Note;
@@ -38,6 +40,8 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, onSave, onClose, onCreateNo
   const [showPromptMenu, setShowPromptMenu] = useState(false);
   const [showRefineMenu, setShowRefineMenu] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
   
   const content = tabs.find(t => t.id === activeTabId)?.content || '';
   const activeTab = tabs.find(t => t.id === activeTabId);
@@ -125,11 +129,15 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, onSave, onClose, onCreateNo
     isUserEditingRef.current = false;
     setLiveTranscript('');
     startLiveSession();
+    playSound.pop();
+    haptic.medium();
   };
 
   const handleStopRecording = () => {
     if (isGeminiLive) stopLiveSession();
     if (isNativeListening) stopNativeListening();
+    playSound.pop();
+    haptic.medium();
   };
 
   const handleManualRefine = () => {
@@ -270,6 +278,8 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, onSave, onClose, onCreateNo
 
   const handleSave = () => {
     onSave({ ...note, title, content: originalContent });
+    playSound.success();
+    haptic.medium();
     onClose();
   };
 
@@ -292,6 +302,8 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, onSave, onClose, onCreateNo
     try {
       await navigator.clipboard.writeText(content);
       setCopySuccess(true);
+      playSound.success();
+      haptic.light();
       setTimeout(() => setCopySuccess(false), 2000);
     } catch (err) {
       console.error('Failed to copy:', err);
@@ -301,6 +313,10 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, onSave, onClose, onCreateNo
   const handleCreateNoteFromTab = () => {
     if (onCreateNote && activeTab && activeTab.id !== 'original') {
       onCreateNote(content, activeTab.label);
+      playSound.success();
+      haptic.medium();
+      setToastMessage('Note created on canvas ✓');
+      setShowToast(true);
     }
   };
 
@@ -594,6 +610,10 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, onSave, onClose, onCreateNo
           </div>
         )}
       </div>
+      
+      {showToast && (
+        <Toast message={toastMessage} onClose={() => setShowToast(false)} />
+      )}
     </div>
   );
 };

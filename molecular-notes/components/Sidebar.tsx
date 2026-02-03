@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { Folder as FolderType, LineType, Note, NoteType } from '../types';
+import { playSound, haptic } from '../utils/feedback';
 
 interface SidebarProps {
   user: FirebaseUser | null;
@@ -26,6 +27,7 @@ interface SidebarProps {
   activeLineType: LineType;
   activeLineThickness: number;
   onOpenSettings: () => void;
+  onShowToast?: (message: string) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
@@ -42,7 +44,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   activeColor,
   activeLineType,
   activeLineThickness,
-  onOpenSettings
+  onOpenSettings,
+  onShowToast
 }) => {
   const [isDirectoryOpen, setIsDirectoryOpen] = useState(false);
   const [isSubmenuOpen, setIsSubmenuOpen] = useState(false);
@@ -330,6 +333,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                   onUpdateFolders(folders.filter(f => f.id !== confirmDeleteFolderId)); 
                   setConfirmDeleteFolderId(null); 
                   setDeleteModeActive(false);
+                  playSound.delete();
+                  haptic.strong();
+                  if (onShowToast) onShowToast('Folder deleted');
                 }} 
                 className="flex-1 h-10 bg-red-600 hover:bg-red-500 text-white text-sm font-bold rounded-lg transition-all"
               >
