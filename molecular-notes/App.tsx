@@ -9,6 +9,7 @@ import SettingsModal from './components/SettingsModal';
 import ShareModal from './components/ShareModal';
 import OnboardingHint from './components/OnboardingHint';
 import Toast from './components/Toast';
+import SelectionBox from './components/SelectionBox';
 import { Folder, Note, Connection, Point, NoteType, LineType, RadialOption, GeminiConfig } from './types';
 import { v4 as uuidv4 } from 'uuid';
 import { Lightbulb, Footprints, FileText, DollarSign, Wrench, User, Trash2, AlertTriangle, CheckSquare } from 'lucide-react';
@@ -84,6 +85,11 @@ const App: React.FC = () => {
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastKey, setToastKey] = useState(0);
+
+  // Selection mode state
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectionRect, setSelectionRect] = useState<{start: Point, end: Point} | null>(null);
+  const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
 
   // Background state
   const [activeBackground, setActiveBackground] = useState<string>('grid');
@@ -417,6 +423,12 @@ const App: React.FC = () => {
     const coords = getCanvasCoords(e);
     setCursorPos(coords);
 
+    // NEW: Selection mode - start drawing selection rectangle
+    if (isSelectMode && !nodeId) {
+      setSelectionRect({ start: coords, end: coords });
+      return;
+    }
+
     if (activeTool === 'pan') {
       setMovingNodeId('PAN_CANVAS');
       return;
@@ -433,7 +445,7 @@ const App: React.FC = () => {
       setTargetNodeId(nodeId || null);
     }, 450);
     setLongPressTimer(timer);
-  }, [activeTool, movingNodeId, getCanvasCoords, connectingFromId, zoom, pan, longPressTimer]);
+  }, [activeTool, movingNodeId, getCanvasCoords, connectingFromId, zoom, pan, longPressTimer, isSelectMode]);
 
   const handleInputMove = useCallback((e: any) => {
     if (e.touches && e.touches.length === 2) {
@@ -448,7 +460,6 @@ const App: React.FC = () => {
       return;
     }
 
-    // Only process move if we have a starting point
     if (!lastPointRef.current) return;
 
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -462,44 +473,51 @@ const App: React.FC = () => {
     const coords = getCanvasCoords(e);
     setCursorPos(coords);
 
+    if (isSelectMode && selectionRect) {
+      setSelectionRect({ ...selectionRect, end: coords });
+      return;
+    }
+
     if (movingNodeIdRef.current === 'PAN_CANVAS') {
       setPan(p => ({ x: p.x + dx, y: p.y + dy }));
       if (longPressTimer) { clearTimeout(longPressTimer); setLongPressTimer(null); }
+    } else if (movingNodeIdRef.current === 'BATCH_MOVE') {
+      setNotes(prev => prev.map(n => selectedNoteIds.includes(n.id) ? { ...n, x: n.x + dx / zoom, y: n.y + dy / zoom } : n));
+      if (longPressTimer) { clearTimeout(longPressTimer); setLongPressTimer(null); }
     } else if (movingNodeIdRef.current && movingNodeIdRef.current !== 'PAN_CANVAS') {
-      // This is normal drag with mouse button held - don't interfere with move mode
       setNotes(prev => prev.map(n => n.id === movingNodeIdRef.current ? { ...n, x: coords.x, y: coords.y } : n));
       if (longPressTimer) { clearTimeout(longPressTimer); setLongPressTimer(null); }
     }
 
-    // Check for potential connection targets
     if (connectingFromId) {
       let foundTarget: string | null = null;
       for (const note of notes) {
-        if (note.id === connectingFromId || note.folderId !== activeFolderId) continue;
+        if (connectingFromId === 'BATCH_CONNECT' ? selectedNoteIds.includes(note.id) : note.id === connectingFromId) continue;
+        if (note.folderId !== activeFolderId) continue;
         const dist = Math.sqrt(Math.pow(note.x - coords.x, 2) + Math.pow(note.y - coords.y, 2));
         if (dist < 44) { foundTarget = note.id; break; }
       }
       setPotentialTargetId(foundTarget);
       if (longPressTimer) { clearTimeout(longPressTimer); setLongPressTimer(null); }
     }
-  }, [getCanvasCoords, longPressTimer, connectingFromId, notes, activeFolderId]);
+  }, [getCanvasCoords, longPressTimer, connectingFromId, notes, activeFolderId, isSelectMode, selectionRect, selectedNoteIds, zoom]);
 
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent) => {
     const coords = getCanvasCoords(e);
     setCursorPos(coords);
     
-    // Check for potential connection targets when connecting
     if (connectingFromId) {
       let foundTarget: string | null = null;
       for (const note of notes) {
-        if (note.id === connectingFromId || note.folderId !== activeFolderId) continue;
+        if (connectingFromId === 'BATCH_CONNECT' ? selectedNoteIds.includes(note.id) : note.id === connectingFromId) continue;
+        if (note.folderId !== activeFolderId) continue;
         const dist = Math.sqrt(Math.pow(note.x - coords.x, 2) + Math.pow(note.y - coords.y, 2));
         if (dist < 44) { foundTarget = note.id; break; }
       }
       setPotentialTargetId(foundTarget);
     }
     
-    if (movingNodeIdRef.current && movingNodeIdRef.current !== 'PAN_CANVAS') {
+    if (movingNodeIdRef.current && movingNodeIdRef.current !== 'PAN_CANVAS' && movingNodeIdRef.current !== 'BATCH_MOVE') {
       setNotes(prev => prev.map(n => 
         n.id === movingNodeIdRef.current ? { ...n, x: coords.x, y: coords.y } : n
       ));
@@ -509,24 +527,24 @@ const App: React.FC = () => {
     if (lastPointRef.current) {
       handleInputMove(e);
     }
-  }, [getCanvasCoords, handleInputMove, connectingFromId, notes, activeFolderId]);
+  }, [getCanvasCoords, handleInputMove, connectingFromId, notes, activeFolderId, selectedNoteIds]);
 
   const handleCanvasTouchMove = useCallback((e: React.TouchEvent) => {
     const coords = getCanvasCoords(e);
     setCursorPos(coords);
     
-    // Check for potential connection targets when connecting
     if (connectingFromId) {
       let foundTarget: string | null = null;
       for (const note of notes) {
-        if (note.id === connectingFromId || note.folderId !== activeFolderId) continue;
+        if (connectingFromId === 'BATCH_CONNECT' ? selectedNoteIds.includes(note.id) : note.id === connectingFromId) continue;
+        if (note.folderId !== activeFolderId) continue;
         const dist = Math.sqrt(Math.pow(note.x - coords.x, 2) + Math.pow(note.y - coords.y, 2));
         if (dist < 44) { foundTarget = note.id; break; }
       }
       setPotentialTargetId(foundTarget);
     }
     
-    if (movingNodeIdRef.current && movingNodeIdRef.current !== 'PAN_CANVAS') {
+    if (movingNodeIdRef.current && movingNodeIdRef.current !== 'PAN_CANVAS' && movingNodeIdRef.current !== 'BATCH_MOVE') {
       setNotes(prev => prev.map(n => 
         n.id === movingNodeIdRef.current ? { ...n, x: coords.x, y: coords.y } : n
       ));
@@ -534,7 +552,7 @@ const App: React.FC = () => {
     }
     
     handleInputMove(e);
-  }, [getCanvasCoords, handleInputMove, connectingFromId, notes, activeFolderId]);
+  }, [getCanvasCoords, handleInputMove, connectingFromId, notes, activeFolderId, selectedNoteIds]);
 
   const handleCanvasMouseLeave = useCallback((e: React.MouseEvent) => {
     if (movingNodeIdRef.current && movingNodeIdRef.current !== 'PAN_CANVAS') {
@@ -550,14 +568,76 @@ const App: React.FC = () => {
     lastPointRef.current = null;
     if (longPressTimer) { clearTimeout(longPressTimer); setLongPressTimer(null); }
     
+    if (isSelectMode && selectionRect) {
+      const selected = notes.filter(n => 
+        n.folderId === activeFolderId && isNoteInSelection(n, selectionRect)
+      );
+      
+      if (selected.length === 0) {
+        setIsSelectMode(false);
+        setSelectionRect(null);
+        setToastMessage('No notes in selection');
+        setToastKey(prev => prev + 1);
+        setShowToast(true);
+        return;
+      }
+      
+      setSelectedNoteIds(selected.map(n => n.id));
+      const centerX = (selectionRect.start.x + selectionRect.end.x) / 2;
+      const centerY = (selectionRect.start.y + selectionRect.end.y) / 2;
+      setRadialPos({ 
+        x: centerX * zoom + pan.x, 
+        y: centerY * zoom + pan.y 
+      });
+      setSelectionRect(null);
+      playSound.pop();
+      haptic.light();
+      return;
+    }
+    
     if (movingNodeId === 'PAN_CANVAS') {
       setMovingNodeId(null);
       return;
     } 
     
+    if (movingNodeId === 'BATCH_MOVE') {
+      updateData({ notes });
+      setMovingNodeId(null);
+      setSelectedNoteIds([]);
+      setIsSelectMode(false);
+      playSound.success();
+      haptic.medium();
+      setToastMessage('Notes moved ✓');
+      setToastKey(prev => prev + 1);
+      setShowToast(true);
+      return;
+    }
+    
     if (movingNodeId) {
       updateData({ notes });
       setMovingNodeId(null);
+      return;
+    }
+    
+    if (connectingFromId === 'BATCH_CONNECT' && potentialTargetId) {
+      const newConnections = selectedNoteIds.map(id => ({
+        id: uuidv4(),
+        from: id,
+        to: potentialTargetId,
+        lineType: activeLineType,
+        color: activeColor,
+        thickness: activeLineThickness
+      }));
+      updateData({ connections: [...connections, ...newConnections] });
+      playSound.success();
+      haptic.medium();
+      setToastMessage(`${selectedNoteIds.length} notes connected ✓`);
+      setToastKey(prev => prev + 1);
+      setShowToast(true);
+      setConnectingFromId(null);
+      setPotentialTargetId(null);
+      setSelectedNoteIds([]);
+      setIsSelectMode(false);
       return;
     }
     
@@ -612,6 +692,15 @@ const App: React.FC = () => {
     setToastKey(prev => prev + 1);
     setShowToast(true);
   };
+
+  // Helper: Check if note is inside selection rectangle
+  const isNoteInSelection = useCallback((note: Note, rect: {start: Point, end: Point}) => {
+    const minX = Math.min(rect.start.x, rect.end.x);
+    const maxX = Math.max(rect.start.x, rect.end.x);
+    const minY = Math.min(rect.start.y, rect.end.y);
+    const maxY = Math.max(rect.start.y, rect.end.y);
+    return note.x >= minX && note.x <= maxX && note.y >= minY && note.y <= maxY;
+  }, []);
 
   const renderConnection = (conn: Connection) => {
     const from = notes.find(n => n.id === conn.from);
@@ -847,7 +936,7 @@ const App: React.FC = () => {
         >
           <svg className="absolute inset-0 w-[8000px] h-[8000px] pointer-events-none">
             {connections.filter(c => notes.find(n => n.id === c.from)?.folderId === activeFolderId).map(renderConnection)}
-            {connectingFromId && (
+            {connectingFromId && connectingFromId !== 'BATCH_CONNECT' && (
               <line 
                 x1={notes.find(n => n.id === connectingFromId)?.x} 
                 y1={notes.find(n => n.id === connectingFromId)?.y} 
@@ -858,6 +947,22 @@ const App: React.FC = () => {
                 className="animate-pulse"
               />
             )}
+            {connectingFromId === 'BATCH_CONNECT' && selectedNoteIds.map(id => {
+              const fromNote = notes.find(n => n.id === id);
+              if (!fromNote) return null;
+              return (
+                <line 
+                  key={id}
+                  x1={fromNote.x} 
+                  y1={fromNote.y} 
+                  x2={potentialTargetId ? notes.find(n => n.id === potentialTargetId)?.x : cursorPos.x} 
+                  y2={potentialTargetId ? notes.find(n => n.id === potentialTargetId)?.y : cursorPos.y} 
+                  stroke={activeColor} strokeWidth={activeLineThickness} 
+                  strokeDasharray={activeLineType === 'dashed' ? "8,8" : activeLineType === 'dotted' ? "1,4" : undefined}
+                  className="animate-pulse"
+                />
+              );
+            })}
           </svg>
 
           {notes.filter(n => n.folderId === activeFolderId).map(note => (
@@ -871,6 +976,8 @@ const App: React.FC = () => {
                 movingNodeId === note.id ? 'z-50 border-cyan-500 shadow-[0_0_15px_rgba(0,255,255,0.2)] scale-110' : 'transition-all hover:border-cyan-500/50'
               } ${
                 potentialTargetId === note.id ? 'scale-125 ring-4 ring-cyan-500 shadow-[0_0_30px_rgba(0,255,255,0.6)] z-50 animate-pulse' : ''
+              } ${
+                selectedNoteIds.includes(note.id) ? 'ring-2 ring-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.5)] z-40' : ''
               }`}
               style={{ left: note.x, top: note.y, color: note.color, borderColor: potentialTargetId === note.id ? '#00FFFF' : undefined }}
             >
@@ -894,6 +1001,15 @@ const App: React.FC = () => {
               </div>
             </div>
           ))}
+          
+          {selectionRect && (
+            <SelectionBox 
+              start={selectionRect.start} 
+              end={selectionRect.end} 
+              zoom={zoom} 
+              pan={pan} 
+            />
+          )}
         </div>
       </main>
 
@@ -901,9 +1017,43 @@ const App: React.FC = () => {
         <RadialMenu 
           isVisible={!!radialPos} x={radialPos?.x || 0} y={radialPos?.y || 0}
           onSelect={(opt: RadialOption) => {
+            const isBatchMode = selectedNoteIds.length > 0;
+            
+            if (opt === 'select') {
+              setIsSelectMode(true);
+              setRadialPos(null);
+              return;
+            }
+            
+            if (isBatchMode) {
+              if (opt === 'delete') {
+                setConfirmDeleteId('BATCH_DELETE');
+                setRadialPos(null);
+                return;
+              }
+              if (opt === 'move') {
+                setMovingNodeId('BATCH_MOVE');
+                setRadialPos(null);
+                return;
+              }
+              if (opt === 'connect') {
+                setConnectingFromId('BATCH_CONNECT');
+                setRadialPos(null);
+                return;
+              }
+              if (opt === 'share') {
+                setSharingNoteId('BATCH_SHARE');
+                setRadialPos(null);
+                return;
+              }
+              setSelectedNoteIds([]);
+              setIsSelectMode(false);
+              setRadialPos(null);
+              return;
+            }
+            
             if (opt === 'create') {
               setIsCreateMenuOpen(true);
-              // Keep radialPos for CreateMenu positioning, but it will be cleared when CreateMenu closes
             }
             else if (opt === 'move' && targetNodeId) { 
               setMovingNodeId(targetNodeId); 
@@ -927,10 +1077,16 @@ const App: React.FC = () => {
             }
             else if (opt === 'share' && targetNodeId) { 
               setSharingNoteId(targetNodeId);
-              // Keep radialPos for ShareModal positioning
+              setRadialPos(null);
             }
           }}
-          onClose={() => setRadialPos(null)}
+          onClose={() => {
+            setRadialPos(null);
+            if (selectedNoteIds.length > 0) {
+              setSelectedNoteIds([]);
+              setIsSelectMode(false);
+            }
+          }}
         />
       )}
 
@@ -961,12 +1117,21 @@ const App: React.FC = () => {
         />
       )}
 
-      {sharingNoteId && radialPos && (
+      {sharingNoteId && (
         <ShareModal
-          note={notes.find(n => n.id === sharingNoteId)!}
-          onClose={() => { setSharingNoteId(null); setRadialPos(null); }}
-          x={radialPos.x}
-          y={radialPos.y}
+          notes={sharingNoteId === 'BATCH_SHARE' 
+            ? notes.filter(n => selectedNoteIds.includes(n.id))
+            : [notes.find(n => n.id === sharingNoteId)!]
+          }
+          onClose={() => {
+            setSharingNoteId(null);
+            if (sharingNoteId === 'BATCH_SHARE') {
+              setSelectedNoteIds([]);
+              setIsSelectMode(false);
+            }
+          }}
+          x={window.innerWidth / 2}
+          y={window.innerHeight / 2}
         />
       )}
 
@@ -974,20 +1139,40 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6">
           <div className="max-w-sm w-full bg-[#0a0a0a] border border-white/10 rounded-2xl p-6 flex flex-col gap-4 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
             <div className="space-y-2">
-              <h2 className="text-base font-bold text-white">Delete Note?</h2>
+              <h2 className="text-base font-bold text-white">Delete {confirmDeleteId === 'BATCH_DELETE' ? `${selectedNoteIds.length} Notes` : 'Note'}?</h2>
               <p className="text-gray-400 text-sm">
-                "{notes.find(n => n.id === confirmDeleteId)?.title}" will be permanently removed.
+                {confirmDeleteId === 'BATCH_DELETE' 
+                  ? `${selectedNoteIds.length} notes will be permanently removed.`
+                  : `"${notes.find(n => n.id === confirmDeleteId)?.title}" will be permanently removed.`
+                }
               </p>
             </div>
             <div className="flex gap-3">
-              <button onClick={() => { 
-                updateData({ notes: notes.filter(n => n.id !== confirmDeleteId), connections: connections.filter(c => c.from !== confirmDeleteId && c.to !== confirmDeleteId) }); 
+              <button onClick={() => {
+                if (confirmDeleteId === 'BATCH_DELETE') {
+                  updateData({ 
+                    notes: notes.filter(n => !selectedNoteIds.includes(n.id)), 
+                    connections: connections.filter(c => !selectedNoteIds.includes(c.from) && !selectedNoteIds.includes(c.to)) 
+                  });
+                  playSound.delete();
+                  haptic.strong();
+                  setToastMessage(`${selectedNoteIds.length} notes deleted`);
+                  setToastKey(prev => prev + 1);
+                  setShowToast(true);
+                  setSelectedNoteIds([]);
+                  setIsSelectMode(false);
+                } else {
+                  updateData({ 
+                    notes: notes.filter(n => n.id !== confirmDeleteId), 
+                    connections: connections.filter(c => c.from !== confirmDeleteId && c.to !== confirmDeleteId) 
+                  });
+                  playSound.delete();
+                  haptic.strong();
+                  setToastMessage('Note deleted');
+                  setToastKey(prev => prev + 1);
+                  setShowToast(true);
+                }
                 setConfirmDeleteId(null);
-                playSound.delete();
-                haptic.strong();
-                setToastMessage('Note deleted');
-                setToastKey(prev => prev + 1);
-                setShowToast(true);
               }} className="flex-1 h-10 bg-red-600 hover:bg-red-500 text-white text-sm font-bold rounded-lg transition-all">
                 Delete
               </button>

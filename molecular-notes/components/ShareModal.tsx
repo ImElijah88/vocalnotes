@@ -3,14 +3,14 @@ import { Copy, Download, ExternalLink, Share2, X } from 'lucide-react';
 import { Note } from '../types';
 
 interface ShareModalProps {
-  note: Note;
+  notes: Note[];
   onClose: () => void;
   x: number;
   y: number;
 }
 
-const ShareModal: React.FC<ShareModalProps> = ({ note, onClose, x, y }) => {
-  const shareText = `${note.title}\n\n${note.content}`;
+const ShareModal: React.FC<ShareModalProps> = ({ notes, onClose, x, y }) => {
+  const shareText = notes.map(note => `${note.title}\n\n${note.content}`).join('\n\n---\n\n');
 
   const handleCopyToClipboard = () => {
     navigator.clipboard.writeText(shareText).then(() => onClose()).catch(() => {});
@@ -28,7 +28,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ note, onClose, x, y }) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${note.title.replace(/\s+/g, '_')}.txt`;
+    a.download = notes.length === 1 ? `${notes[0].title.replace(/\s+/g, '_')}.txt` : 'notes.txt';
     a.click();
     URL.revokeObjectURL(url);
     onClose();
@@ -36,7 +36,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ note, onClose, x, y }) => {
 
   const handleNativeShare = () => {
     if (navigator.share) {
-      navigator.share({ title: note.title, text: shareText }).catch(() => {});
+      navigator.share({ title: notes.length === 1 ? notes[0].title : 'Notes', text: shareText }).catch(() => {});
     }
     onClose();
   };

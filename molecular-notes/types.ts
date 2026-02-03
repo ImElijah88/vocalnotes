@@ -28,7 +28,7 @@ export interface Folder {
   order: number;
 }
 
-export type RadialOption = 'create' | 'move' | 'connect' | 'view' | 'delete' | 'share';
+export type RadialOption = 'create' | 'move' | 'connect' | 'view' | 'delete' | 'share' | 'select';
 
 export interface Point {
   x: number;
